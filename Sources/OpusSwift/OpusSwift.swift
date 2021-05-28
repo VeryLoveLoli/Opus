@@ -8,6 +8,7 @@
 import Foundation
 import AudioToolbox
 import Opus
+import Print
 
 /**
  Opus 音频加解码
@@ -53,7 +54,7 @@ open class OpusSwift {
         queue.async {
             
             /// 地址
-            guard let url = CFURLCreateWithFileSystemPath(kCFAllocatorDefault, pcmPath as CFString, .cfurlposixPathStyle, false) else { complete(false); print("CFURLCreateWithFileSystemPath Error"); return }
+            guard let url = CFURLCreateWithFileSystemPath(kCFAllocatorDefault, pcmPath as CFString, .cfurlposixPathStyle, false) else { complete(false); Print.error("CFURLCreateWithFileSystemPath Error"); return }
             
             /// 状态
             var status: OSStatus = noErr
@@ -61,32 +62,32 @@ open class OpusSwift {
             /// 获取文件句柄
             var file: ExtAudioFileRef?
             status = ExtAudioFileOpenURL(url, &file)
-            guard status == noErr else { complete(false); print("ExtAudioFileOpenURL \(status)"); return }
+            guard status == noErr else { complete(false); Print.error("ExtAudioFileOpenURL \(status)"); return }
             
             /// 获取文件音频流参数
             var description = AudioStreamBasicDescription()
             var size = UInt32(MemoryLayout.stride(ofValue: description))
             status = ExtAudioFileGetProperty(file!, kExtAudioFileProperty_FileDataFormat, &size, &description)
-            guard status == noErr else { complete(false); print("ExtAudioFileGetProperty kExtAudioFileProperty_FileDataFormat \(status)"); return }
+            guard status == noErr else { complete(false); Print.error("ExtAudioFileGetProperty kExtAudioFileProperty_FileDataFormat \(status)"); return }
             
             /// 获取文件音频流帧数
             var numbersFrames: Int64 = 0
             var numbersFramesSize = UInt32(MemoryLayout.stride(ofValue: numbersFrames))
             status = ExtAudioFileGetProperty(file!, kExtAudioFileProperty_FileLengthFrames, &numbersFramesSize, &numbersFrames)
-            guard status == noErr else { complete(false); print("ExtAudioFileGetProperty kExtAudioFileProperty_FileLengthFrames \(status)"); return }
+            guard status == noErr else { complete(false); Print.error("ExtAudioFileGetProperty kExtAudioFileProperty_FileLengthFrames \(status)"); return }
             
             /// 设置客户端音频流参数（数据转换成这个参数播放）
             var client = clientDescription
             if client != nil {
                 status = ExtAudioFileSetProperty(file!, kExtAudioFileProperty_ClientDataFormat, UInt32(MemoryLayout.stride(ofValue: client)), &client)
-                guard status == noErr else { complete(false); print("ExtAudioFileSetProperty kExtAudioFileProperty_ClientDataFormat \(status)"); return }
+                guard status == noErr else { complete(false); Print.error("ExtAudioFileSetProperty kExtAudioFileProperty_ClientDataFormat \(status)"); return }
                 /// 转码率后的帧数
                 numbersFrames = Int64(Float64(numbersFrames)/description.mSampleRate*client!.mSampleRate)
                 description = client!
             }
             
             /// 创建编码器
-            guard let opus = opus_encoder_create(opus_int32(description.mSampleRate), Int32(description.mChannelsPerFrame), type.value, &status) else { complete(false); print("opus_encoder_create \(status)"); return }
+            guard let opus = opus_encoder_create(opus_int32(description.mSampleRate), Int32(description.mChannelsPerFrame), type.value, &status) else { complete(false); Print.error("opus_encoder_create \(status)"); return }
             
             /// 每个时间片帧数
             var inNumberFrames = UInt32(description.mSampleRate*0.0025*Float64(multiple))
@@ -145,12 +146,12 @@ open class OpusSwift {
                 
                 /// 读取数据
                 status = ExtAudioFileRead(file!, &ioNumberFrames, &bufferList)
-                guard status == noErr else { print("ExtAudioFileRead \(status)"); closeFile(); complete(false); return }
+                guard status == noErr else { Print.error("ExtAudioFileRead \(status)"); closeFile(); complete(false); return }
                 
                 /// PCM缓冲长度
                 let pcmBufferCount = Int(bufferList.mBuffers.mDataByteSize)/MemoryLayout.stride(ofValue: Int16())
                 /// 转换读取数据
-                guard let pcmBuffer = bufferList.mBuffers.mData?.bindMemory(to: Int16.self, capacity: pcmBufferCount) else { print("mBuffers.mData to UnsafeMutablePointer<Int16> Error"); closeFile(); complete(false); return }
+                guard let pcmBuffer = bufferList.mBuffers.mData?.bindMemory(to: Int16.self, capacity: pcmBufferCount) else { Print.error("mBuffers.mData to UnsafeMutablePointer<Int16> Error"); closeFile(); complete(false); return }
                 
                 var buffer = Array(repeating: UInt8(0), count: maxFrameSize)
                 
@@ -171,7 +172,7 @@ open class OpusSwift {
                     }
                     else {
                         
-                        print("opus_encode error \(number) ioNumberFrames \(ioNumberFrames) inNumberFrames \(inNumberFrames)")
+                        Print.error("opus_encode error \(number) ioNumberFrames \(ioNumberFrames) inNumberFrames \(inNumberFrames)")
                         
                         if ioNumberFrames == inNumberFrames {
                             
@@ -213,20 +214,20 @@ open class OpusSwift {
             /// 获取文件音频流参数
             var description = AudioStreamBasicDescription()
             var count = fread(&description, 40, 1, opusFile)
-            guard count == 1 else{ print("fread AudioStreamBasicDescription error \(count)"); complete(false); return }
+            guard count == 1 else{ Print.error("fread AudioStreamBasicDescription error \(count)"); complete(false); return }
             
             /// 时间片数
             var timeNumber: Int64 = 0
             count = fread(&timeNumber, 8, 1, opusFile)
-            guard count == 1 else{ print("fread timeNumber error \(count)"); complete(false); return }
+            guard count == 1 else{ Print.error("fread timeNumber error \(count)"); complete(false); return }
             
             /// 每个时间片帧数
             var inNumberFrames: UInt32 = 0
             count = fread(&inNumberFrames, 4, 1, opusFile)
-            guard count == 1 else{ print("fread inNumberFrames error \(count)"); complete(false); return }
+            guard count == 1 else{ Print.error("fread inNumberFrames error \(count)"); complete(false); return }
             
             /// 地址
-            guard let url = CFURLCreateWithFileSystemPath(kCFAllocatorDefault, pcmPath as CFString, .cfurlposixPathStyle, false) else { print("CFURLCreateWithFileSystemPath error \(pcmPath)"); complete(false); return }
+            guard let url = CFURLCreateWithFileSystemPath(kCFAllocatorDefault, pcmPath as CFString, .cfurlposixPathStyle, false) else { Print.error("CFURLCreateWithFileSystemPath error \(pcmPath)"); complete(false); return }
             
             /// 状态
             var status: OSStatus = noErr
@@ -237,13 +238,13 @@ open class OpusSwift {
             let flags = AudioFileFlags.eraseFile
             /// 创建音频文件（文件头4096长度）
             status = ExtAudioFileCreateWithURL(url, type, &description, nil, flags.rawValue, &file)
-            guard status == noErr else { print("ExtAudioFileCreateWithURL error \(status)"); return }
+            guard status == noErr else { Print.error("ExtAudioFileCreateWithURL error \(status)"); return }
             
             /// 设置客户端音频流参数（数据转换成这个参数写入）
             var client = clientDescription
             if client != nil {
                 status = ExtAudioFileSetProperty(file!, kExtAudioFileProperty_ClientDataFormat, UInt32(MemoryLayout.stride(ofValue: client)), &client)
-                guard status == noErr else { print("ExtAudioFileSetProperty kExtAudioFileProperty_ClientDataFormat error \(status)"); complete(false); return }
+                guard status == noErr else { Print.error("ExtAudioFileSetProperty kExtAudioFileProperty_ClientDataFormat error \(status)"); complete(false); return }
                 description = client!
             }
             
@@ -255,7 +256,7 @@ open class OpusSwift {
             bufferList.mBuffers.mData = calloc(Int(inNumberFrames), Int(description.mBytesPerFrame))
             
             /// 创建解码器
-            guard let opus = opus_decoder_create(opus_int32(description.mSampleRate), Int32(description.mChannelsPerFrame), nil) else { print("opus_decoder_create error"); complete(false); return }
+            guard let opus = opus_decoder_create(opus_int32(description.mSampleRate), Int32(description.mChannelsPerFrame), nil) else { Print.error("opus_decoder_create error"); complete(false); return }
             
             /// 关闭
             func closeFile() {
@@ -276,12 +277,12 @@ open class OpusSwift {
                 /// 字节数
                 var bytesCount: Int32 = 0
                 count = fread(&bytesCount, 4, 1, opusFile)
-                guard count == 1 else{ print("fread bytesCount error \(count)"); closeFile(); complete(false); return }
+                guard count == 1 else{ Print.error("fread bytesCount error \(count)"); closeFile(); complete(false); return }
                 
                 /// 数据
                 var bytes = Array(repeating: UInt8(0), count: Int(bytesCount))
                 count = fread(&bytes, 1, Int(bytesCount), opusFile)
-                guard count == bytesCount else{ print("fread bytes error \(count)"); closeFile(); complete(false); return }
+                guard count == bytesCount else{ Print.error("fread bytes error \(count)"); closeFile(); complete(false); return }
                 
                 /// 缓冲长度
                 let bufferCount = Int(bufferList.mBuffers.mDataByteSize)/MemoryLayout.stride(ofValue: opus_int16(0))
@@ -290,13 +291,13 @@ open class OpusSwift {
                 
                 /// 解码
                 let number = opus_decode(opus, &bytes, opus_int32(bytesCount), &buffer, Int32(bufferCount), 0)
-                guard number == Int32(inNumberFrames) else { print("opus_decode error \(number) bufferCount \(bufferCount)"); closeFile(); complete(false); return }
+                guard number == Int32(inNumberFrames) else { Print.error("opus_decode error \(number) bufferCount \(bufferCount)"); closeFile(); complete(false); return }
                 
                 /// 拷贝内存值
                 bufferList.mBuffers.mData?.copyMemory(from: [UInt8](Data.init(bytes: buffer, count: Int(bufferCount*MemoryLayout<opus_int16>.stride))), byteCount: bufferCount*MemoryLayout<opus_int16>.stride)
                 /// 写入文件
                 status = ExtAudioFileWrite(file!, inNumberFrames, &bufferList)
-                guard status == noErr else { print("ExtAudioFileWrite error \(status)"); closeFile(); complete(false); return }
+                guard status == noErr else { Print.error("ExtAudioFileWrite error \(status)"); closeFile(); complete(false); return }
             }
             
             progress(1)
