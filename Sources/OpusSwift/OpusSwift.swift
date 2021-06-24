@@ -87,7 +87,7 @@ open class OpusSwift {
             }
             
             /// 创建编码器
-            guard let opus = opus_encoder_create(opus_int32(description.mSampleRate), Int32(description.mChannelsPerFrame), type.value, &status) else { complete(false); Print.error("opus_encoder_create \(status)"); return }
+            let opus = OpusSwift(Int(description.mSampleRate), channels: Int(description.mChannelsPerFrame), bitsPer: Int(description.mBitsPerChannel), multiple: multiple, type: type)
             
             /// 每个时间片帧数
             var inNumberFrames = UInt32(description.mSampleRate*0.0025*Float64(multiple))
@@ -109,9 +109,6 @@ open class OpusSwift {
             fwrite(&timeNumber, 8, 1, opusFile)
             fwrite(&inNumberFrames, 4, 1, opusFile)
             
-            /// 最大帧数大小
-            let maxFrameSize = Int(inNumberFrames) * Int(description.mChannelsPerFrame) * 2
-            
             /// 缓冲
             var bufferList = AudioBufferList()
             bufferList.mNumberBuffers = 1
@@ -123,7 +120,7 @@ open class OpusSwift {
             func closeFile() {
                 
                 /// 关闭编码
-                opus_encoder_destroy(opus)
+                opus.close()
                 /// 释放内存
                 free(bufferList.mBuffers.mData!)
                 /// 关闭文件
@@ -131,62 +128,36 @@ open class OpusSwift {
                 fclose(opusFile)
             }
             
-            /// 编码帧数
-            var encodeNumberFrames: UInt32 = 0
-            
             /// 帧数
-            var ioNumberFrames: UInt32 = bufferList.mBuffers.mDataByteSize/description.mBytesPerFrame
+            var ioNumberFrames = inNumberFrames
             
             /// 编码字节数
-            var number: Int32 = 0
+            var number: UInt16 = 0
             
-            repeat {
+            for i in 0..<timeNumber {
                 
-                progress(Float(encodeNumberFrames)/Float(numbersFrames))
+                progress(Float(i)/Float(timeNumber))
                 
                 /// 读取数据
                 status = ExtAudioFileRead(file!, &ioNumberFrames, &bufferList)
                 guard status == noErr else { Print.error("ExtAudioFileRead \(status)"); closeFile(); complete(false); return }
+                guard ioNumberFrames == inNumberFrames else { Print.error("ioNumberFrames != inNumberFrames ioNumberFrames: \(ioNumberFrames) inNumberFrames: \(inNumberFrames)"); closeFile(); complete(false); return }
                 
-                /// PCM缓冲长度
-                let pcmBufferCount = Int(bufferList.mBuffers.mDataByteSize)/MemoryLayout.stride(ofValue: Int16())
-                /// 转换读取数据
-                guard let pcmBuffer = bufferList.mBuffers.mData?.bindMemory(to: Int16.self, capacity: pcmBufferCount) else { Print.error("mBuffers.mData to UnsafeMutablePointer<Int16> Error"); closeFile(); complete(false); return }
+                var bytes = [UInt8](repeating: 0, count: Int(ioNumberFrames)*Int(description.mBytesPerFrame))
+                memcpy(&bytes, bufferList.mBuffers.mData!, bytes.count)
                 
-                var buffer = Array(repeating: UInt8(0), count: maxFrameSize)
+                /// 编码
+                guard let buffer = opus.encode(bytes) else { Print.error("opus_encode error"); closeFile(); complete(false); return }
                 
-                if ioNumberFrames == 0 {
-                    
-                }
-                else {
-                    
-                    /// 编码
-                    number = opus_encode(opus, pcmBuffer, Int32(ioNumberFrames), &buffer, opus_int32(maxFrameSize))
-                    
-                    if number > 0 {
-                        
-                        /// 长度
-                        fwrite(&number, 4, 1, opusFile)
-                        /// 数据
-                        fwrite(buffer, 1, Int(number), opusFile)
-                    }
-                    else {
-                        
-                        Print.error("opus_encode error \(number) ioNumberFrames \(ioNumberFrames) inNumberFrames \(inNumberFrames)")
-                        
-                        if ioNumberFrames == inNumberFrames {
-                            
-                            closeFile()
-                            complete(false)
-                            return
-                        }
-                    }
-                }
+                number = UInt16(buffer.count)
                 
-                encodeNumberFrames += ioNumberFrames
-                
-            } while ioNumberFrames != 0
+                /// 长度
+                fwrite(&number, 2, 1, opusFile)
+                /// 数据
+                fwrite(buffer, 1, Int(number), opusFile)
+            }
             
+            progress(1)
             closeFile()
             complete(true)
         }
@@ -256,13 +227,13 @@ open class OpusSwift {
             bufferList.mBuffers.mData = calloc(Int(inNumberFrames), Int(description.mBytesPerFrame))
             
             /// 创建解码器
-            guard let opus = opus_decoder_create(opus_int32(description.mSampleRate), Int32(description.mChannelsPerFrame), nil) else { Print.error("opus_decoder_create error"); complete(false); return }
+            let opus = OpusSwift(Int(description.mSampleRate), channels: Int(description.mChannelsPerFrame), bitsPer: Int(description.mBitsPerChannel))
             
             /// 关闭
             func closeFile() {
                 
                 /// 关闭解码
-                opus_decoder_destroy(opus)
+                opus.close()
                 /// 释放内存
                 free(bufferList.mBuffers.mData!)
                 /// 关闭文件
@@ -275,8 +246,8 @@ open class OpusSwift {
                 progress(Float(i)/Float(timeNumber))
                 
                 /// 字节数
-                var bytesCount: Int32 = 0
-                count = fread(&bytesCount, 4, 1, opusFile)
+                var bytesCount: UInt16 = 0
+                count = fread(&bytesCount, 2, 1, opusFile)
                 guard count == 1 else{ Print.error("fread bytesCount error \(count)"); closeFile(); complete(false); return }
                 
                 /// 数据
@@ -284,17 +255,11 @@ open class OpusSwift {
                 count = fread(&bytes, 1, Int(bytesCount), opusFile)
                 guard count == bytesCount else{ Print.error("fread bytes error \(count)"); closeFile(); complete(false); return }
                 
-                /// 缓冲长度
-                let bufferCount = Int(bufferList.mBuffers.mDataByteSize)/MemoryLayout.stride(ofValue: opus_int16(0))
-                /// 缓冲数据
-                var buffer = Array.init(repeating: opus_int16(0), count: bufferCount)
-                
                 /// 解码
-                let number = opus_decode(opus, &bytes, opus_int32(bytesCount), &buffer, Int32(bufferCount), 0)
-                guard number == Int32(inNumberFrames) else { Print.error("opus_decode error \(number) bufferCount \(bufferCount)"); closeFile(); complete(false); return }
+                guard let buffer = opus.decode(bytes) else { Print.error("opus_decode error"); closeFile(); complete(false); return }
                 
-                /// 拷贝内存值
-                bufferList.mBuffers.mData?.copyMemory(from: [UInt8](Data.init(bytes: buffer, count: Int(bufferCount*MemoryLayout<opus_int16>.stride))), byteCount: bufferCount*MemoryLayout<opus_int16>.stride)
+                bufferList.mBuffers.mData?.copyMemory(from: buffer, byteCount: buffer.count)
+                
                 /// 写入文件
                 status = ExtAudioFileWrite(file!, inNumberFrames, &bufferList)
                 guard status == noErr else { Print.error("ExtAudioFileWrite error \(status)"); closeFile(); complete(false); return }

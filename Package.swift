@@ -26,6 +26,6 @@ let package = Package(
         .target(name: "OpusSwift", dependencies: ["Opus", "Print"]),
         .testTarget(
             name: "OpusTests",
-            dependencies: ["Opus"]),
+            dependencies: ["Opus", "OpusSwift"]),
     ]
 )
